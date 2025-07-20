@@ -1,46 +1,72 @@
-from django.db import models
-from django.utils import timezone
+from django.core.management.base import BaseCommand, CommandError
+from django.core.cache import cache
+from ip_tracking.models import BlockedIP
+import ipaddress
 
 
-class RequestLog(models.Model):
-    """Model to log incoming requests with IP, timestamp, and path."""
-    ip_address = models.GenericIPAddressField()
-    timestamp = models.DateTimeField(default=timezone.now)
-    path = models.CharField(max_length=255)
-    country = models.CharField(max_length=100, blank=True, null=True)
-    city = models.CharField(max_length=100, blank=True, null=True)
+class Command(BaseCommand):
+    help = 'Add IP addresses to the blacklist'
 
-    class Meta:
-        db_table = 'ip_tracking_requestlog'
-        ordering = ['-timestamp']
+    def add_arguments(self, parser):
+        parser.add_argument('ip_address', type=str, help='IP address to block')
+        parser.add_argument(
+            '--reason',
+            type=str,
+            help='Reason for blocking the IP address',
+            default='Manual block'
+        )
+        parser.add_argument(
+            '--unblock',
+            action='store_true',
+            help='Remove IP address from blacklist'
+        )
 
-    def __str__(self):
-        return f"{self.ip_address} - {self.path} at {self.timestamp}"
+    def handle(self, *args, **options):
+        ip_address = options['ip_address']
+        reason = options['reason']
+        unblock = options['unblock']
 
+        # Validate IP address format
+        try:
+            ipaddress.ip_address(ip_address)
+        except ValueError:
+            raise CommandError(f'Invalid IP address format: {ip_address}')
 
-class BlockedIP(models.Model):
-    """Model to store blacklisted IP addresses."""
-    ip_address = models.GenericIPAddressField(unique=True)
-    created_at = models.DateTimeField(default=timezone.now)
-    reason = models.TextField(blank=True, null=True)
-
-    class Meta:
-        db_table = 'ip_tracking_blockedip'
-
-    def __str__(self):
-        return f"Blocked: {self.ip_address}"
-
-
-class SuspiciousIP(models.Model):
-    """Model to store IPs flagged as suspicious."""
-    ip_address = models.GenericIPAddressField()
-    reason = models.CharField(max_length=255)
-    flagged_at = models.DateTimeField(default=timezone.now)
-    resolved = models.BooleanField(default=False)
-
-    class Meta:
-        db_table = 'ip_tracking_suspiciousip'
-        ordering = ['-flagged_at']
-
-    def __str__(self):
-        return f"Suspicious: {self.ip_address} - {self.reason}"
+        if unblock:
+            # Remove from blacklist
+            try:
+                blocked_ip = BlockedIP.objects.get(ip_address=ip_address)
+                blocked_ip.delete()
+                
+                # Clear cache
+                cache_key = f"blocked_ip_{ip_address}"
+                cache.delete(cache_key)
+                
+                self.stdout.write(
+                    self.style.SUCCESS(f'Successfully unblocked IP: {ip_address}')
+                )
+            except BlockedIP.DoesNotExist:
+                self.stdout.write(
+                    self.style.WARNING(f'IP {ip_address} was not in the blacklist')
+                )
+        else:
+            # Add to blacklist
+            blocked_ip, created = BlockedIP.objects.get_or_create(
+                ip_address=ip_address,
+                defaults={'reason': reason}
+            )
+            
+            if created:
+                # Clear cache to ensure immediate effect
+                cache_key = f"blocked_ip_{ip_address}"
+                cache.set(cache_key, True, 300)
+                
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f'Successfully blocked IP: {ip_address} (Reason: {reason})'
+                    )
+                )
+            else:
+                self.stdout.write(
+                    self.style.WARNING(f'IP {ip_address} is already blocked')
+                )

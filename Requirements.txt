@@ -1,0 +1,23 @@
+# Django IP Tracking Requirements
+
+# Core Django
+Django>=4.2.0,<5.0.0
+
+# IP Tracking Dependencies
+django-ipware>=4.0.2
+requests>=2.28.0
+
+# Rate Limiting
+django-ratelimit>=4.0.0
+
+# Redis for caching and rate limiting
+redis>=4.5.0
+django-redis>=5.2.0
+
+# Celery for background tasks
+celery>=5.2.0
+kombu>=5.2.0
+
+# Optional: For more advanced geolocation
+# geoip2>=4.6.0  # MaxMind GeoIP2
+# django-ipgeolocation>=1.4.5  # Alternative ge
